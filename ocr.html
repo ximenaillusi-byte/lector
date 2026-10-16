@@ -1,0 +1,752 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Reconocer texto</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&display=swap">
+<style>
+/* Una sola columna, sin tarjetas. Títulos claros para saltar con la tecla H. Misma paleta que el lector. */
+:root {
+  color-scheme: light;
+  --bg: #F2F4F8; --surface: #FFFFFF; --ink: #0F1A2B; --muted: #3F5068; --line: #B9C4D4;
+  --accent: #1B4DD6; --accent-ink: #FFFFFF; --focus: #B45309;
+  --font: "Atkinson Hyperlegible", "Segoe UI", Verdana, system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0C1220; --surface: #141C2E; --ink: #EAEFF8; --muted: #A9B7CD; --line: #33415C;
+    --accent: #8CB0FF; --accent-ink: #0C1220; --focus: #FFC857;
+  }
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font-family: var(--font); font-size: 1.125rem; line-height: 1.6;
+  padding-inline: 1rem; padding-block: 1.5rem 4rem;
+}
+main { max-width: 46rem; margin-inline: auto; display: flex; flex-direction: column; gap: 2rem; }
+h1 { font-size: 2rem; line-height: 1.15; margin: 0 0 .5rem; text-wrap: balance; }
+h2 { font-size: 1.35rem; line-height: 1.25; margin: 0 0 .75rem; text-wrap: balance; }
+p { margin: 0; }
+.lead { color: var(--muted); max-width: 65ch; }
+section { border-top: 2px solid var(--line); padding-top: 1.25rem; display: flex; flex-direction: column; gap: .9rem; min-width: 0; }
+.status { color: var(--muted); }
+.hint { color: var(--muted); font-size: 1rem; }
+label { font-weight: 700; }
+.field { display: flex; flex-direction: column; gap: .35rem; }
+.row { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; }
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: .8rem; }
+input[type="number"], select, textarea {
+  font: inherit; color: var(--ink); background: var(--surface);
+  border: 2px solid var(--line); border-radius: .5rem; padding: .55rem .7rem; min-height: 3rem; max-width: 100%; width: 100%;
+}
+textarea { resize: vertical; line-height: 1.6; }
+input[type="file"] { font: inherit; max-width: 100%; }
+input[type="file"]::file-selector-button, button {
+  font: inherit; font-weight: 700; color: var(--ink); background: var(--surface);
+  border: 2px solid var(--ink); border-radius: .5rem; padding: .55rem 1rem; min-height: 3rem; cursor: pointer;
+}
+input[type="file"]::file-selector-button { margin-right: .8rem; }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button:hover { text-decoration: underline; text-underline-offset: 3px; }
+button:disabled { opacity: .55; cursor: not-allowed; }
+progress { width: 100%; height: 1.2rem; accent-color: var(--accent); }
+.check { display: flex; gap: .7rem; align-items: flex-start; font-weight: 400; }
+.check input { width: 1.5rem; height: 1.5rem; margin-top: .2rem; flex: none; accent-color: var(--accent); }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+details summary { cursor: pointer; font-weight: 700; padding-block: .75rem; min-height: 3rem; }
+details > .inner { display: flex; flex-direction: column; gap: .8rem; padding: .3rem 0 .8rem 1rem; border-left: 3px solid var(--line); }
+input[type="range"] { width: 100%; height: 2.2rem; accent-color: var(--accent); }
+.val { font-weight: 400; color: var(--muted); font-variant-numeric: tabular-nums; }
+ul { margin: 0; padding-left: 1.4rem; display: grid; gap: .4rem; }
+@media (max-width: 40rem) { body { font-size: 1.05rem; padding-inline: .75rem; } h1 { font-size: 1.7rem; } main { gap: 1.4rem; } }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Reconocer texto</h1>
+    <p class="lead">Convierte un PDF escaneado, o fotos de las hojas, en un archivo de texto que podés escuchar en el lector. Todo ocurre en tu navegador: el archivo no se sube a ningún servidor.</p>
+  </header>
+
+  <section aria-labelledby="h-arch">
+    <h2 id="h-arch">1. Elegí el archivo</h2>
+    <div class="field">
+      <label for="archivo">PDF escaneado, o una o varias fotos</label>
+      <input type="file" id="archivo" accept=".pdf,application/pdf,image/*" multiple>
+    </div>
+    <p id="nombre" class="status">Ningún archivo elegido.</p>
+  </section>
+
+  <section aria-labelledby="h-opc">
+    <h2 id="h-opc">2. Opciones</h2>
+    <div class="field">
+      <label for="idioma">Idioma del documento</label>
+      <select id="idioma">
+        <option value="spa">Español</option>
+        <option value="eng">Inglés</option>
+      </select>
+    </div>
+    <div class="pair">
+      <div class="field">
+        <label for="desde">Desde la página</label>
+        <input type="number" id="desde" min="1" inputmode="numeric" placeholder="1">
+      </div>
+      <div class="field">
+        <label for="hasta">Hasta la página</label>
+        <input type="number" id="hasta" min="1" inputmode="numeric" placeholder="Última">
+      </div>
+    </div>
+    <p class="hint">Para probar, elegí un tramo corto, por ejemplo de la 1 a la 3. Si dejás los campos vacíos, se reconoce todo el documento.</p>
+  </section>
+
+  <section aria-labelledby="h-go">
+    <h2 id="h-go">3. Reconocer</h2>
+    <div class="row">
+      <button type="button" id="go" class="primary">Reconocer texto</button>
+      <button type="button" id="stop" hidden>Detener</button>
+    </div>
+    <div class="field">
+      <label for="prog">Progreso</label>
+      <progress id="prog" max="100" value="0">0 %</progress>
+    </div>
+    <p id="estado" class="status" role="status" aria-live="polite"></p>
+    <p class="hint">La primera vez descarga los datos del idioma, unos 2 MB, y después los guarda. Dejá esta pantalla abierta mientras trabaja. En el celular puede tardar varios segundos por página.</p>
+  </section>
+
+  <section aria-labelledby="h-corr" id="corrSec" hidden>
+    <h2 id="h-corr">4. Corregir errores (opcional)</h2>
+    <p class="lead">Busca palabras mal reconocidas, por ejemplo «tcoría» en lugar de «teoría», y une las palabras partidas por guion al final del renglón y corrige solas las que tienen una corrección clara. Las dudosas no las toca, salvo que marques la opción de abajo. Todo ocurre en tu navegador: el texto no se envía a ningún servidor.</p>
+    <label class="check" for="agresivo"><input type="checkbox" id="agresivo"><span>Corregir también los casos menos seguros. Corrige más palabras, pero con más riesgo de equivocarse.</span></label>
+    <div class="row">
+      <button type="button" id="corregir" class="primary">Corregir automáticamente</button>
+      <button type="button" id="deshacer" hidden>Deshacer la corrección</button>
+    </div>
+    <p id="estadoCorr" class="status" role="status" aria-live="polite"></p>
+    <details id="detCambios" hidden>
+      <summary>Qué se cambió</summary>
+      <div class="inner"><ul id="listaCambios"></ul></div>
+    </details>
+    <details id="detDudosas" hidden>
+      <summary>Palabras dudosas que no toqué</summary>
+      <div class="inner">
+        <p class="hint">Pueden ser nombres propios, palabras poco comunes o errores con más de una corrección posible. Conviene revisarlas.</p>
+        <ul id="listaDudosas"></ul>
+      </div>
+    </details>
+    <p class="hint">La primera vez descarga el diccionario, unos pocos MB, y después el navegador lo guarda.</p>
+  </section>
+
+  <section aria-labelledby="h-res" id="resSec" hidden>
+    <h2 id="h-res">5. Resultado</h2>
+    <div class="row">
+      <button type="button" id="descargar" class="primary">Descargar texto (.txt)</button>
+      <button type="button" id="copiar">Copiar texto</button>
+    </div>
+    <div class="field">
+      <label for="salida">Vista previa del texto reconocido</label>
+      <textarea id="salida" readonly rows="12"></textarea>
+    </div>
+    <div class="row">
+      <button type="button" id="leer" class="primary">Leer en voz alta</button>
+      <button type="button" id="detener" hidden>Detener la lectura</button>
+    </div>
+    <p id="posLectura" class="hint" hidden></p>
+    <details id="ctrlVoz">
+      <summary>Controles de voz</summary>
+      <div class="inner">
+        <details>
+          <summary>Velocidad</summary>
+          <div class="inner">
+            <label for="vel">Velocidad de lectura: <span class="val" id="velVal">1,0 veces</span></label>
+            <input type="range" id="vel" min="0.5" max="3" step="0.1" value="1">
+          </div>
+        </details>
+        <details>
+          <summary>Tono</summary>
+          <div class="inner">
+            <label for="tono">Tono de la voz: <span class="val" id="tonoVal">1,0</span></label>
+            <input type="range" id="tono" min="0.5" max="1.5" step="0.1" value="1">
+          </div>
+        </details>
+        <details>
+          <summary>Voz</summary>
+          <div class="inner">
+            <label for="voz">Voz del navegador</label>
+            <select id="voz"></select>
+            <p class="hint" id="avisoVoces"></p>
+          </div>
+        </details>
+      </div>
+    </details>
+    <p class="hint">El archivo descargado marca el cambio de página de forma que el lector respeta las páginas del original. Cargalo en el lector como cualquier archivo de texto.</p>
+  </section>
+
+  <section aria-labelledby="h-tips">
+    <h2 id="h-tips">Para que el reconocimiento salga mejor</h2>
+    <ul>
+      <li>Usá hojas derechas, con buena luz y sin sombras.</li>
+      <li>Si sacás fotos con el celular, tomalas de frente y con el texto en horizontal.</li>
+      <li>Revisá siempre el principio, el medio y el final del resultado. Las páginas con muy poco texto se avisan al terminar.</li>
+    </ul>
+  </section>
+</main>
+
+<script>
+(function () {
+'use strict';
+
+var $ = function (id) { return document.getElementById(id); };
+var PDFJS = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
+var TESS = 'https://cdn.jsdelivr.net/npm/tesseract.js@6.0.1/dist/tesseract.min.js';
+var LANGS = {
+  spa: 'https://cdn.jsdelivr.net/npm/@tesseract.js-data/spa/4.0.0_best_int',
+  eng: 'https://cdn.jsdelivr.net/npm/@tesseract.js-data/eng/4.0.0_best_int'
+};
+
+var files = [], kind = '', pdfDoc = null, total = 0;
+var running = false, cancel = false, results = [], outName = 'texto', wake = null;
+var resultLang = 'spa', originalTexts = [], correcting = false;
+
+function say(msg) { $('estado').textContent = msg; }
+function loadScript(src) {
+  return new Promise(function (ok, fail) {
+    var s = document.createElement('script');
+    s.src = src; s.onload = ok;
+    s.onerror = function () { fail(new Error('No se pudo cargar ' + src)); };
+    document.head.appendChild(s);
+  });
+}
+async function ensurePdfJs() {
+  if (!window.pdfjsLib) await loadScript(PDFJS + 'pdf.min.js');
+  window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS + 'pdf.worker.min.js';
+}
+function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
+
+/* ---------- elegir archivo ---------- */
+$('archivo').addEventListener('change', async function (e) {
+  files = Array.prototype.slice.call(e.target.files || []);
+  pdfDoc = null; total = 0; kind = ''; $('resSec').hidden = true; $('corrSec').hidden = true;
+  if (!files.length) { $('nombre').textContent = 'Ningún archivo elegido.'; return; }
+  var isPdf = function (f) { return /\.pdf$/i.test(f.name) || f.type === 'application/pdf'; };
+  var pdfs = files.filter(isPdf);
+  if (pdfs.length && files.length > 1) {
+    files = []; $('nombre').textContent = 'Elegí un solo PDF, o bien varias fotos. No se pueden mezclar.'; say('Elegí un solo PDF, o bien varias fotos.'); return;
+  }
+  outName = files[0].name.replace(/\.[^.]+$/, '') || 'texto';
+  if (pdfs.length) {
+    kind = 'pdf';
+    $('nombre').textContent = 'Abriendo ' + files[0].name + '…';
+    try {
+      await ensurePdfJs();
+      var buf = await files[0].arrayBuffer();
+      pdfDoc = await window.pdfjsLib.getDocument({ data: buf }).promise;
+      total = pdfDoc.numPages;
+      $('nombre').textContent = files[0].name + ': ' + plural(total, 'página', 'páginas') + '.';
+    } catch (err) {
+      kind = ''; files = [];
+      var pw = err && err.name === 'PasswordException';
+      $('nombre').textContent = pw ? 'Este PDF tiene contraseña. Quitásela y volvé a elegirlo.' : 'No pude abrir el PDF. Probá con otro archivo, o revisá la conexión a internet.';
+      say($('nombre').textContent);
+    }
+  } else {
+    kind = 'img'; total = files.length;
+    files.sort(function (a, b) { return a.name.localeCompare(b.name, undefined, { numeric: true }); });
+    $('nombre').textContent = plural(total, 'foto elegida', 'fotos elegidas') + ', en orden de nombre.';
+  }
+  if (total) { $('hasta').placeholder = 'Última (' + total + ')'; }
+});
+
+/* ---------- preparar cada página como imagen ---------- */
+function newCanvas(w, h) { var c = document.createElement('canvas'); c.width = Math.round(w); c.height = Math.round(h); return c; }
+async function pageCanvas(n) {
+  if (kind === 'pdf') {
+    var page = await pdfDoc.getPage(n);
+    var base = page.getViewport({ scale: 1 });
+    var scale = Math.max(1.5, Math.min(3, 2400 / Math.max(base.width, base.height)));
+    var vp = page.getViewport({ scale: scale });
+    var c = newCanvas(vp.width, vp.height);
+    var ctx = c.getContext('2d');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+    await page.render({ canvasContext: ctx, viewport: vp }).promise;
+    page.cleanup();
+    return c;
+  }
+  var f = files[n - 1];
+  var bmp = await createImageBitmap(f);
+  var k = Math.min(1, 3000 / Math.max(bmp.width, bmp.height));
+  var cv = newCanvas(bmp.width * k, bmp.height * k);
+  cv.getContext('2d').drawImage(bmp, 0, 0, cv.width, cv.height);
+  if (bmp.close) bmp.close();
+  return cv;
+}
+function tidy(t) { return t.replace(/\f/g, '\n').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim(); }
+
+/* ---------- reconocer ---------- */
+function busy(on) {
+  running = on;
+  $('go').disabled = on; $('archivo').disabled = on; $('idioma').disabled = on; $('desde').disabled = on; $('hasta').disabled = on;
+  $('stop').hidden = !on;
+}
+async function keepAwake(on) {
+  try {
+    if (on && navigator.wakeLock && !wake) wake = await navigator.wakeLock.request('screen');
+    else if (!on && wake) { await wake.release(); wake = null; }
+  } catch (e) { wake = null; }
+}
+async function run() {
+  if (running) return;
+  if (!files.length || !total) { say('Primero elegí un archivo.'); return; }
+  var from = Math.max(1, Math.min(total, parseInt($('desde').value, 10) || 1));
+  var to = Math.max(from, Math.min(total, parseInt($('hasta').value, 10) || total));
+  var count = to - from + 1;
+  resetReading();
+  busy(true); cancel = false; results = []; $('resSec').hidden = true; $('corrSec').hidden = true; $('prog').value = 0;
+  keepAwake(true);
+  var worker = null;
+  try {
+    say('Preparando el reconocimiento. La primera vez descarga los datos del idioma.');
+    if (!window.Tesseract) await loadScript(TESS);
+    var lang = $('idioma').value, done = 0;
+    resultLang = lang;
+    worker = await window.Tesseract.createWorker(lang, 1, {
+      langPath: LANGS[lang],
+      logger: function (m) {
+        if (m && m.status === 'recognizing text' && typeof m.progress === 'number') {
+          $('prog').value = Math.min(100, Math.round((done + m.progress) / count * 100));
+        }
+      }
+    });
+    for (var n = from; n <= to && !cancel; n++) {
+      say('Reconociendo la página ' + (n - from + 1) + ' de ' + count + '.');
+      var canvas = await pageCanvas(n);
+      var res = await worker.recognize(canvas);
+      canvas.width = 0; canvas.height = 0;
+      results.push({ n: n, text: tidy(res.data.text || '') });
+      done++; $('prog').value = Math.round(done / count * 100);
+    }
+    await worker.terminate(); worker = null;
+    finish(cancel);
+  } catch (err) {
+    if (worker) { try { await worker.terminate(); } catch (e) {} }
+    if (results.length) finish(true, true);
+    else say('No pude reconocer el texto. Revisá la conexión a internet y volvé a intentar. Si el problema sigue, probá con un tramo más corto o con otro archivo.');
+  } finally {
+    busy(false); keepAwake(false);
+  }
+}
+function finish(stopped, failed) {
+  if (!results.length) { say('Se detuvo antes de terminar la primera página.'); return; }
+  var weak = results.filter(function (r) { return r.text.length < 30; }).map(function (r) { return r.n; });
+  var msg = (failed ? 'Hubo un error y quedó incompleto. ' : stopped ? 'Detenido. ' : 'Listo. ') + 'Se reconocieron ' + plural(results.length, 'página', 'páginas') + '.';
+  if (weak.length) msg += ' Páginas con muy poco texto, conviene revisarlas: ' + weak.join(', ') + '.';
+  msg += ' Podés descargar el texto o copiarlo.';
+  originalTexts = results.map(function (r) { return r.text; });
+  resetCorrectionUi();
+  refreshOutput();
+  $('resSec').hidden = false;
+  $('corrSec').hidden = false;
+  buildQueue();
+  say(msg);
+}
+function refreshOutput() {
+  $('salida').value = results.map(function (r) { return '--- Página ' + r.n + ' ---\n' + r.text; }).join('\n\n');
+}
+
+/* ---------- lectura en voz alta (voz del navegador, por párrafos) ---------- */
+var synth = window.speechSynthesis;
+var MOBILE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && !!window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+var VKEY = 'lectorOcr.voz.v1';
+var prefs = { voiceURI: '', rate: 1, pitch: 1 };
+try {
+  var sv = JSON.parse(localStorage.getItem(VKEY) || 'null');
+  if (sv) {
+    if (typeof sv.voiceURI === 'string') prefs.voiceURI = sv.voiceURI;
+    if (typeof sv.rate === 'number') prefs.rate = Math.max(0.5, Math.min(3, sv.rate));
+    if (typeof sv.pitch === 'number') prefs.pitch = Math.max(0.5, Math.min(1.5, sv.pitch));
+  }
+} catch (e) {}
+function savePrefs() { try { localStorage.setItem(VKEY, JSON.stringify(prefs)); } catch (e) {} }
+function setText(el, t) { if (el.textContent !== t) el.textContent = t; }
+
+var voices = [], gen = 0, speakTimer = 0, startDelay = 0;
+var queue = [], qi = 0, playing = false;
+
+function currentVoice() { return voices.filter(function (v) { return v.voiceURI === prefs.voiceURI; })[0] || null; }
+function loadVoices() {
+  if (!synth) return;
+  var all = synth.getVoices();
+  if (!all.length) return;
+  var es = all.filter(function (v) { return /^es([-_]|$)/i.test(v.lang); });
+  voices = (es.length ? es : all).slice();
+  voices.sort(function (a, b) { return (a.lang + a.name).localeCompare(b.lang + b.name); });
+  $('avisoVoces').textContent = (es.length ? '' : 'No encontré voces en español. Se muestran todas. ') +
+    'El navegador ofrece ' + plural(all.length, 'voz', 'voces') + ' en total, ' + es.length + ' en español.';
+  var sel = $('voz');
+  sel.textContent = '';
+  voices.forEach(function (v) {
+    var o = document.createElement('option');
+    o.value = v.voiceURI; o.textContent = v.name + ' (' + v.lang + ')' + (v.localService === false ? ', en línea' : '');
+    sel.appendChild(o);
+  });
+  var pick = voices.filter(function (v) { return v.voiceURI === prefs.voiceURI; })[0];
+  if (!pick) {
+    var order = ['es-AR', 'es-419', 'es-MX', 'es-US', 'es-ES'];
+    for (var i = 0; i < order.length && !pick; i++) {
+      pick = voices.filter(function (v) { return v.lang.replace('_', '-').toLowerCase() === order[i].toLowerCase(); })[0];
+    }
+    pick = pick || voices[0];
+  }
+  prefs.voiceURI = pick.voiceURI; sel.value = pick.voiceURI;
+}
+function valText() {
+  var r = prefs.rate.toFixed(1).replace('.', ','), p = prefs.pitch.toFixed(1).replace('.', ',');
+  setText($('velVal'), r + ' veces'); setText($('tonoVal'), p);
+  $('vel').setAttribute('aria-valuetext', r + ' veces la velocidad normal');
+  $('tono').setAttribute('aria-valuetext', p);
+}
+
+function stopSpeech() { gen++; clearTimeout(speakTimer); if (synth) synth.cancel(); }
+/* En el celular, TalkBack también usa el motor de voz y puede cortar la frase del navegador.
+   Por eso espera un momento antes de hablar y, si la frase se corta sola, la repite hasta dos veces. */
+function speak(text, done) {
+  if (!synth) { if (done) done(); return; }
+  var g = ++gen, tries = 0, delay = startDelay;
+  startDelay = 0;
+  clearTimeout(speakTimer);
+  synth.cancel();
+  function attempt(wait) {
+    speakTimer = setTimeout(function () {
+      if (g !== gen) return;
+      try { synth.resume(); } catch (e) {}
+      var u = new SpeechSynthesisUtterance(text), v = currentVoice();
+      if (v) u.voice = v;
+      u.lang = v ? v.lang : 'es-AR';
+      u.rate = prefs.rate; u.pitch = prefs.pitch;
+      var t0 = Date.now(), started = false, closed = false, guard = 0;
+      function close() { closed = true; clearTimeout(guard); }
+      function retryOrDone() {
+        if (tries < 2) { tries++; try { synth.cancel(); } catch (e) {} attempt(500); }
+        else if (done) done();
+      }
+      guard = setTimeout(function () {
+        if (!closed && !started && g === gen) { close(); retryOrDone(); }
+      }, 4000);
+      u.onstart = function () { started = true; clearTimeout(guard); };
+      u.onend = function () {
+        if (closed || g !== gen) return;
+        close();
+        var expected = text.length * 45 / Math.max(prefs.rate, 0.5);
+        if (Date.now() - t0 < 1000 && expected > 2000) retryOrDone();
+        else if (done) done();
+      };
+      u.onerror = function () {
+        if (closed || g !== gen) return;
+        close(); retryOrDone();
+      };
+      synth.speak(u);
+    }, wait);
+  }
+  attempt(delay || (MOBILE ? 120 : 0));
+}
+
+function paragraphsOf(text) {
+  var out = [];
+  text.split(/\n[ \t]*\n/).forEach(function (block) {
+    var cur = '';
+    block.split('\n').forEach(function (raw) {
+      var ln = raw.replace(/\s+/g, ' ').trim();
+      if (!ln) return;
+      if (!cur) cur = ln;
+      else if (/\p{L}-$/u.test(cur) && /^\p{Ll}/u.test(ln)) cur = cur.slice(0, -1) + ln;
+      else cur += ' ' + ln;
+    });
+    if (cur && /[\p{L}\p{N}]/u.test(cur)) out.push(cur);
+  });
+  return out;
+}
+function splitLong(p, max) {
+  if (p.length <= max) return [p];
+  var out = [], cur = '';
+  p.split(/(?<=[.!?…])\s+/).forEach(function (s) {
+    while (s.length > max) {
+      var cut = s.lastIndexOf(' ', max);
+      if (cut < max / 2) cut = max;
+      if (cur) { out.push(cur); cur = ''; }
+      out.push(s.slice(0, cut).trim());
+      s = s.slice(cut).trim();
+    }
+    if (!s) return;
+    if (cur && (cur + ' ' + s).length > max) { out.push(cur); cur = s; }
+    else cur = cur ? cur + ' ' + s : s;
+  });
+  if (cur) out.push(cur);
+  return out;
+}
+function buildQueue() {
+  queue = []; qi = 0; playing = false;
+  results.forEach(function (r) {
+    var paras = paragraphsOf(r.text);
+    if (!paras.length) return;
+    queue.push({ kind: 'page', text: 'Página ' + r.n, page: r.n });
+    paras.forEach(function (p, i) {
+      splitLong(p, 600).forEach(function (chunk) {
+        queue.push({ kind: 'para', text: chunk, page: r.n, pi: i + 1, pn: paras.length });
+      });
+    });
+  });
+  readUi();
+}
+function whereText() {
+  var it = queue[qi] || queue[queue.length - 1];
+  if (!it) return '';
+  return it.kind === 'para' ? 'la página ' + it.page + ', párrafo ' + it.pi + ' de ' + it.pn : 'la página ' + it.page;
+}
+function readUi() {
+  var shown = playing || qi > 0;
+  $('leer').disabled = !queue.length || !synth;
+  setText($('leer'), playing ? 'Pausar la lectura' : (qi > 0 ? 'Continuar la lectura' : 'Leer en voz alta'));
+  $('detener').hidden = !shown;
+  $('posLectura').hidden = !shown;
+}
+function readNext() {
+  if (!playing) return;
+  var it = queue[qi];
+  if (!it) { endReading(); return; }
+  if (it.kind === 'para') setText($('posLectura'), 'Leyendo ' + whereText() + '.');
+  speak(it.text, function () { if (!playing) return; qi++; readNext(); });
+}
+function startReading() {
+  if (!synth || !queue.length || playing) return;
+  playing = true; startDelay = MOBILE ? 800 : 0;
+  keepAwake(true); readUi(); readNext();
+}
+function pauseReading() {
+  if (!playing) return;
+  playing = false; stopSpeech(); keepAwake(false); readUi();
+  say('Lectura en pausa en ' + whereText() + '.');
+}
+function stopReading(silent) {
+  var had = playing || qi > 0;
+  playing = false; stopSpeech(); qi = 0; keepAwake(false);
+  if (document.activeElement === $('detener')) $('leer').focus();
+  readUi();
+  if (!silent && had) say('Lectura detenida.');
+}
+function endReading() {
+  playing = false; qi = 0; keepAwake(false);
+  readUi();
+  say('Fin de la lectura. Para seguir, elegí otro rango de páginas arriba y volvé a reconocer el texto.');
+}
+function resetReading() { stopReading(true); queue = []; readUi(); }
+function restartCurrent() { if (playing) { stopSpeech(); startDelay = 300; readNext(); } }
+
+$('leer').addEventListener('click', function () { playing ? pauseReading() : startReading(); });
+$('detener').addEventListener('click', function () { stopReading(false); });
+$('voz').addEventListener('change', function (e) { prefs.voiceURI = e.target.value; savePrefs(); restartCurrent(); });
+$('vel').addEventListener('input', function (e) { prefs.rate = parseFloat(e.target.value); valText(); savePrefs(); });
+$('vel').addEventListener('change', restartCurrent);
+$('tono').addEventListener('input', function (e) { prefs.pitch = parseFloat(e.target.value); valText(); savePrefs(); });
+$('tono').addEventListener('change', restartCurrent);
+
+if (!synth) { $('leer').disabled = true; $('avisoVoces').textContent = 'Este navegador no tiene voz integrada. No se puede leer en voz alta.'; }
+else { loadVoices(); synth.addEventListener('voiceschanged', loadVoices); setTimeout(loadVoices, 600); }
+$('vel').value = prefs.rate; $('tono').value = prefs.pitch; valText();
+
+/* ---------- corrección ortográfica (en el navegador, con diccionarios Hunspell) ---------- */
+var NSPELL = 'https://cdn.jsdelivr.net/npm/nspell@2/+esm';
+var DICT = {
+  spa: 'https://cdn.jsdelivr.net/npm/dictionary-es@4',
+  eng: 'https://cdn.jsdelivr.net/npm/dictionary-en@4'
+};
+var spells = {};
+function sayC(msg) { $('estadoCorr').textContent = msg; }
+function getSpell(lang) {
+  if (!spells[lang]) {
+    var p = (async function () {
+      var mod = await import(NSPELL);
+      var make = mod.default || mod;
+      var get = function (u) {
+        return fetch(u).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); });
+      };
+      var d = await Promise.all([get(DICT[lang] + '/index.aff'), get(DICT[lang] + '/index.dic')]);
+      return make(d[0], d[1]);
+    })();
+    p.catch(function () { delete spells[lang]; });
+    spells[lang] = p;
+  }
+  return spells[lang];
+}
+var CONF = {};
+'ce co eo ao ae il it ij lt nu nr nm hb hn ft gq gy vy uv sz cg'.split(' ').forEach(function (p) { CONF[p] = 1; });
+function plain(s) { return s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase(); }
+function marks(s) { return (s.normalize('NFD').match(/\p{M}/gu) || []).length; }
+/* Costo de cambiar una letra por otra: las tildes y las confusiones típicas del OCR (c/e, i/l, n/u...) cuestan menos. */
+function sub(x, y) {
+  if (x === y) return 0;
+  var px = plain(x), py = plain(y);
+  if (px === py) return 0.3;
+  return (CONF[px + py] || CONF[py + px]) ? 0.5 : 1;
+}
+function wlev(a, b) {
+  var m = a.length, n = b.length, i, j;
+  if (!m) return n;
+  if (!n) return m;
+  var prev = [], cur;
+  for (j = 0; j <= n; j++) prev[j] = j;
+  for (i = 1; i <= m; i++) {
+    cur = [i];
+    for (j = 1; j <= n; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + sub(a.charAt(i - 1), b.charAt(j - 1)));
+    }
+    prev = cur;
+  }
+  return prev[n];
+}
+/* Solo se toca una palabra si es seguro: no es sigla, número, dirección ni nombre propio a mitad de oración. */
+function eligible(text, m) {
+  var w = m[0], i = m.index, e = i + w.length;
+  if (w.length < 3) return false;
+  if (/\p{Lu}/u.test(w.slice(1))) return false;
+  if (/[\d@\/_]/.test(text.charAt(i - 1)) || /[\d@\/_]/.test(text.charAt(e))) return false;
+  if (/^-[ \t]*\n/.test(text.slice(e, e + 8))) return false;
+  if (/-[ \t]*\n$/.test(text.slice(Math.max(0, i - 8), i))) return false;
+  if (/^\p{Lu}/u.test(w)) {
+    var before = text.slice(0, i).replace(/[ \t"'«“(\[¿¡—–-]+$/, '');
+    if (before && !/[.!?…:\n]$/.test(before)) return false;
+  }
+  return true;
+}
+/* Devuelve { fix: 'palabra', hint } si hay una corrección clara, o { fix: null, hint } si es dudosa. */
+function decide(w, spell, aggr) {
+  var lw = w.toLowerCase();
+  var sug = spell.suggest(w).filter(function (s) { return s && s.indexOf(' ') < 0 && s.indexOf('-') < 0; }).slice(0, 8);
+  if (!sug.length) return { fix: null };
+  var scored = sug.map(function (s) { return { s: s, c: wlev(lw, s.toLowerCase()) }; });
+  var best = Math.min.apply(null, scored.map(function (x) { return x.c; }));
+  var tied = scored.filter(function (x) { return Math.abs(x.c - best) < 0.01; });
+  var pick = tied[0].s;
+  var limit = (w.length <= 5 ? 1 : 2) + (aggr ? 1 : 0);
+  if (best > limit) return { fix: null, hint: pick };
+  if (tied.length > 1 && !(aggr && w.length >= 4) && !(w.length >= 6 && best <= 1)) return { fix: null, hint: pick };
+  if (plain(pick) === plain(w) && marks(pick) <= marks(w)) return { fix: null };
+  if (/^\p{Lu}/u.test(w) && !/^\p{Lu}/u.test(pick)) pick = pick.charAt(0).toUpperCase() + pick.slice(1);
+  return { fix: pick, hint: pick };
+}
+/* Une las palabras cortadas con guion al final del renglón: «infor-\nmación» pasa a «información».
+   Si las dos mitades son palabras y la unión no, se deja el guion («teórico-\npráctico» pasa a «teórico-práctico»). */
+function joinHyphens(text, spell, counter) {
+  return text.replace(/(\p{L}{2,})[-­¬][ \t]*\n[ \t]*(\p{Ll}\p{L}*)/gu, function (all, a, b) {
+    counter.n++;
+    var joined = a + b;
+    if (!spell.correct(joined) && spell.correct(a) && spell.correct(b)) return a + '-' + b;
+    return joined;
+  });
+}
+function resetCorrectionUi() {
+  $('deshacer').hidden = true; $('corregir').disabled = false;
+  $('detCambios').hidden = true; $('detDudosas').hidden = true;
+  $('listaCambios').textContent = ''; $('listaDudosas').textContent = '';
+  sayC('');
+}
+function fillList(ul, items) {
+  ul.textContent = '';
+  items.forEach(function (t) { var li = document.createElement('li'); li.textContent = t; ul.appendChild(li); });
+}
+async function autoCorrect() {
+  if (correcting || !results.length) return;
+  correcting = true; $('corregir').disabled = true;
+  var aggr = $('agresivo').checked;
+  sayC('Cargando el corrector. La primera vez descarga el diccionario.');
+  try {
+    var spell = await getSpell(resultLang);
+    var cache = new Map(), changes = new Map(), doubts = new Map(), work = 0, texts = [], joins = { n: 0 };
+    for (var r = 0; r < results.length; r++) {
+      var text = joinHyphens(originalTexts[r], spell, joins), out = '', last = 0, m, re = new RegExp("\\p{L}+(?:['’]\\p{L}+)*", 'gu');
+      while ((m = re.exec(text))) {
+        var w = m[0];
+        if (!eligible(text, m)) continue;
+        var d;
+        if (cache.has(w)) d = cache.get(w);
+        else {
+          d = spell.correct(w) ? null : decide(w, spell, aggr);
+          cache.set(w, d);
+          if (d && ++work % 6 === 0) {
+            sayC('Revisando la página ' + results[r].n + '…');
+            await new Promise(function (ok) { setTimeout(ok, 0); });
+          }
+        }
+        if (!d) continue;
+        if (d.fix) {
+          out += text.slice(last, m.index) + d.fix; last = m.index + w.length;
+          var c = changes.get(w); if (c) c.n++; else changes.set(w, { to: d.fix, n: 1 });
+        } else {
+          var q = doubts.get(w); if (q) q.n++; else doubts.set(w, { n: 1, hint: d.hint || '' });
+        }
+      }
+      texts.push(out + text.slice(last));
+    }
+    results.forEach(function (res, i) { res.text = texts[i]; });
+    refreshOutput(); stopReading(true); buildQueue();
+    var total = 0; changes.forEach(function (c) { total += c.n; });
+    var ch = [];
+    changes.forEach(function (c, w) { ch.push('«' + w + '» → «' + c.to + '»' + (c.n > 1 ? ' (' + c.n + ' veces)' : '')); });
+    var db = [];
+    Array.from(doubts.entries()).sort(function (x, y) { return y[1].n - x[1].n; }).slice(0, 200).forEach(function (e) {
+      db.push('«' + e[0] + '»' + (e[1].hint ? ', quizá «' + e[1].hint + '»' : '') + (e[1].n > 1 ? ' (' + e[1].n + ' veces)' : ''));
+    });
+    fillList($('listaCambios'), ch); fillList($('listaDudosas'), db);
+    $('detCambios').hidden = !ch.length; $('detDudosas').hidden = !db.length;
+    var parts = [];
+    if (joins.n) parts.push('se unieron ' + plural(joins.n, 'palabra partida', 'palabras partidas') + ' por guion');
+    if (total) parts.push('se corrigieron ' + plural(total, 'palabra', 'palabras') + ' (' + changes.size + ' distintas)');
+    var msg = parts.length ? 'Listo: ' + parts.join(' y ') + '.' : 'No encontré errores con una corrección clara.';
+    if (doubts.size) msg += ' Quedan ' + plural(doubts.size, 'palabra dudosa', 'palabras dudosas') + ' sin tocar, con su posible corrección en la lista.';
+    if (parts.length) msg += ' Podés deshacer todo si algo no te convence.';
+    sayC(msg);
+    $('deshacer').hidden = !parts.length;
+  } catch (err) {
+    sayC('No pude cargar el corrector. Revisá la conexión a internet y volvé a intentar. El texto sigue como estaba.');
+  } finally {
+    correcting = false; $('corregir').disabled = false;
+  }
+}
+function undoCorrection() {
+  results.forEach(function (r, i) { r.text = originalTexts[i]; });
+  refreshOutput(); stopReading(true); buildQueue();
+  $('deshacer').hidden = true;
+  $('detCambios').hidden = true; $('detDudosas').hidden = true;
+  sayC('Corrección deshecha. El texto volvió a como lo reconoció el OCR.');
+  $('corregir').focus();
+}
+$('corregir').addEventListener('click', autoCorrect);
+$('deshacer').addEventListener('click', undoCorrection);
+
+/* ---------- resultado ---------- */
+$('go').addEventListener('click', run);
+$('stop').addEventListener('click', function () { cancel = true; say('Deteniendo al terminar esta página.'); });
+$('descargar').addEventListener('click', function () {
+  var text = results.map(function (r) { return r.text; }).join('\f');
+  var blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = outName + '-texto.txt';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(function () { URL.revokeObjectURL(a.href); }, 4000);
+  say('Descargando ' + outName + '-texto.txt. Revisá tu carpeta de descargas.');
+});
+$('copiar').addEventListener('click', function () {
+  var text = results.map(function (r) { return r.text; }).join('\n\n');
+  var ok = function () { say('Texto copiado.'); };
+  var fallback = function () { $('salida').focus(); $('salida').select(); say('No pude copiar automáticamente. Dejé el texto seleccionado para que lo copies.'); };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(ok, fallback); else fallback();
+});
+})();
+</script>
+</body>
+</html>
