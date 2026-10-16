@@ -118,8 +118,30 @@ ul { margin: 0; padding-left: 1.4rem; display: grid; gap: .4rem; }
     <p class="hint">La primera vez descarga los datos del idioma, unos 2 MB, y después los guarda. Dejá esta pantalla abierta mientras trabaja. En el celular puede tardar varios segundos por página.</p>
   </section>
 
+  <section aria-labelledby="h-corr" id="corrSec" hidden>
+    <h2 id="h-corr">4. Corregir errores (opcional)</h2>
+    <p class="lead">Busca palabras mal reconocidas, por ejemplo «tcoría» en lugar de «teoría», y corrige solas las que tienen una única corrección clara. Las dudosas no las toca. Todo ocurre en tu navegador: el texto no se envía a ningún servidor.</p>
+    <div class="row">
+      <button type="button" id="corregir" class="primary">Corregir automáticamente</button>
+      <button type="button" id="deshacer" hidden>Deshacer la corrección</button>
+    </div>
+    <p id="estadoCorr" class="status" role="status" aria-live="polite"></p>
+    <details id="detCambios" hidden>
+      <summary>Qué se cambió</summary>
+      <div class="inner"><ul id="listaCambios"></ul></div>
+    </details>
+    <details id="detDudosas" hidden>
+      <summary>Palabras dudosas que no toqué</summary>
+      <div class="inner">
+        <p class="hint">Pueden ser nombres propios, palabras poco comunes o errores con más de una corrección posible. Conviene revisarlas.</p>
+        <ul id="listaDudosas"></ul>
+      </div>
+    </details>
+    <p class="hint">La primera vez descarga el diccionario, unos pocos MB, y después el navegador lo guarda.</p>
+  </section>
+
   <section aria-labelledby="h-res" id="resSec" hidden>
-    <h2 id="h-res">4. Resultado</h2>
+    <h2 id="h-res">5. Resultado</h2>
     <div class="row">
       <button type="button" id="descargar" class="primary">Descargar texto (.txt)</button>
       <button type="button" id="copiar">Copiar texto</button>
@@ -187,6 +209,7 @@ var LANGS = {
 
 var files = [], kind = '', pdfDoc = null, total = 0;
 var running = false, cancel = false, results = [], outName = 'texto', wake = null;
+var resultLang = 'spa', originalTexts = [], correcting = false;
 
 function say(msg) { $('estado').textContent = msg; }
 function loadScript(src) {
@@ -206,7 +229,7 @@ function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
 /* ---------- elegir archivo ---------- */
 $('archivo').addEventListener('change', async function (e) {
   files = Array.prototype.slice.call(e.target.files || []);
-  pdfDoc = null; total = 0; kind = ''; $('resSec').hidden = true;
+  pdfDoc = null; total = 0; kind = ''; $('resSec').hidden = true; $('corrSec').hidden = true;
   if (!files.length) { $('nombre').textContent = 'Ningún archivo elegido.'; return; }
   var isPdf = function (f) { return /\.pdf$/i.test(f.name) || f.type === 'application/pdf'; };
   var pdfs = files.filter(isPdf);
@@ -281,13 +304,14 @@ async function run() {
   var to = Math.max(from, Math.min(total, parseInt($('hasta').value, 10) || total));
   var count = to - from + 1;
   resetReading();
-  busy(true); cancel = false; results = []; $('resSec').hidden = true; $('prog').value = 0;
+  busy(true); cancel = false; results = []; $('resSec').hidden = true; $('corrSec').hidden = true; $('prog').value = 0;
   keepAwake(true);
   var worker = null;
   try {
     say('Preparando el reconocimiento. La primera vez descarga los datos del idioma.');
     if (!window.Tesseract) await loadScript(TESS);
     var lang = $('idioma').value, done = 0;
+    resultLang = lang;
     worker = await window.Tesseract.createWorker(lang, 1, {
       langPath: LANGS[lang],
       logger: function (m) {
@@ -320,11 +344,16 @@ function finish(stopped, failed) {
   var msg = (failed ? 'Hubo un error y quedó incompleto. ' : stopped ? 'Detenido. ' : 'Listo. ') + 'Se reconocieron ' + plural(results.length, 'página', 'páginas') + '.';
   if (weak.length) msg += ' Páginas con muy poco texto, conviene revisarlas: ' + weak.join(', ') + '.';
   msg += ' Podés descargar el texto o copiarlo.';
-  var preview = results.map(function (r) { return '--- Página ' + r.n + ' ---\n' + r.text; }).join('\n\n');
-  $('salida').value = preview;
+  originalTexts = results.map(function (r) { return r.text; });
+  resetCorrectionUi();
+  refreshOutput();
   $('resSec').hidden = false;
+  $('corrSec').hidden = false;
   buildQueue();
   say(msg);
+}
+function refreshOutput() {
+  $('salida').value = results.map(function (r) { return '--- Página ' + r.n + ' ---\n' + r.text; }).join('\n\n');
 }
 
 /* ---------- lectura en voz alta (voz del navegador, por párrafos) ---------- */
@@ -526,6 +555,151 @@ $('tono').addEventListener('change', restartCurrent);
 if (!synth) { $('leer').disabled = true; $('avisoVoces').textContent = 'Este navegador no tiene voz integrada. No se puede leer en voz alta.'; }
 else { loadVoices(); synth.addEventListener('voiceschanged', loadVoices); setTimeout(loadVoices, 600); }
 $('vel').value = prefs.rate; $('tono').value = prefs.pitch; valText();
+
+/* ---------- corrección ortográfica (en el navegador, con diccionarios Hunspell) ---------- */
+var NSPELL = 'https://cdn.jsdelivr.net/npm/nspell@2/+esm';
+var DICT = {
+  spa: 'https://cdn.jsdelivr.net/npm/dictionary-es@4',
+  eng: 'https://cdn.jsdelivr.net/npm/dictionary-en@4'
+};
+var spells = {};
+function sayC(msg) { $('estadoCorr').textContent = msg; }
+function getSpell(lang) {
+  if (!spells[lang]) {
+    var p = (async function () {
+      var mod = await import(NSPELL);
+      var make = mod.default || mod;
+      var get = function (u) {
+        return fetch(u).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); });
+      };
+      var d = await Promise.all([get(DICT[lang] + '/index.aff'), get(DICT[lang] + '/index.dic')]);
+      return make(d[0], d[1]);
+    })();
+    p.catch(function () { delete spells[lang]; });
+    spells[lang] = p;
+  }
+  return spells[lang];
+}
+function lev(a, b) {
+  var m = a.length, n = b.length, i, j;
+  if (!m) return n;
+  if (!n) return m;
+  var prev = [], cur = [];
+  for (j = 0; j <= n; j++) prev[j] = j;
+  for (i = 1; i <= m; i++) {
+    cur = [i];
+    for (j = 1; j <= n; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a.charAt(i - 1) === b.charAt(j - 1) ? 0 : 1));
+    }
+    prev = cur;
+  }
+  return prev[n];
+}
+function plain(s) { return s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase(); }
+/* Solo se toca una palabra si es seguro: no está en un nombre propio, sigla, número,
+   dirección ni corte de renglón con guion. */
+function eligible(text, m) {
+  var w = m[0], i = m.index, e = i + w.length;
+  if (w.length < 3) return false;
+  if (/\p{Lu}/u.test(w.slice(1))) return false;
+  if (/[\d@\/_]/.test(text.charAt(i - 1)) || /[\d@\/_]/.test(text.charAt(e))) return false;
+  if (/^-[ \t]*\n/.test(text.slice(e, e + 8))) return false;
+  if (/-[ \t]*\n$/.test(text.slice(Math.max(0, i - 8), i))) return false;
+  if (/^\p{Lu}/u.test(w)) {
+    var before = text.slice(0, i).replace(/[ \t"'«“(\[¿¡—–-]+$/, '');
+    if (before && !/[.!?…:\n]$/.test(before)) return false;
+  }
+  return true;
+}
+/* Devuelve { fix: 'palabra' } si hay una única corrección clara, o { fix: null } si es dudosa. */
+function decide(w, spell) {
+  var lw = w.toLowerCase();
+  var sug = spell.suggest(w).filter(function (s) { return s && s.indexOf(' ') < 0; }).slice(0, 6);
+  if (!sug.length) return { fix: null };
+  var best = 99, n = 0, pick = '';
+  sug.forEach(function (s) {
+    var d = lev(lw, s.toLowerCase());
+    if (d < best) { best = d; n = 1; pick = s; } else if (d === best) n++;
+  });
+  var limit = w.length <= 5 ? 1 : 2;
+  if (best > limit || n > 1) return { fix: null };
+  if (plain(pick) === plain(w)) return { fix: null };
+  if (/^\p{Lu}/u.test(w) && !/^\p{Lu}/u.test(pick)) pick = pick.charAt(0).toUpperCase() + pick.slice(1);
+  return { fix: pick };
+}
+function resetCorrectionUi() {
+  $('deshacer').hidden = true; $('corregir').disabled = false;
+  $('detCambios').hidden = true; $('detDudosas').hidden = true;
+  $('listaCambios').textContent = ''; $('listaDudosas').textContent = '';
+  sayC('');
+}
+function fillList(ul, items) {
+  ul.textContent = '';
+  items.forEach(function (t) { var li = document.createElement('li'); li.textContent = t; ul.appendChild(li); });
+}
+async function autoCorrect() {
+  if (correcting || !results.length) return;
+  correcting = true; $('corregir').disabled = true;
+  sayC('Cargando el corrector. La primera vez descarga el diccionario.');
+  try {
+    var spell = await getSpell(resultLang);
+    var cache = new Map(), changes = new Map(), doubts = new Map(), work = 0, texts = [];
+    for (var r = 0; r < results.length; r++) {
+      var text = originalTexts[r], out = '', last = 0, m, re = new RegExp("\\p{L}+(?:['’]\\p{L}+)*", 'gu');
+      while ((m = re.exec(text))) {
+        var w = m[0];
+        if (!eligible(text, m)) continue;
+        var d;
+        if (cache.has(w)) d = cache.get(w);
+        else {
+          d = spell.correct(w) ? null : decide(w, spell);
+          cache.set(w, d);
+          if (d && ++work % 8 === 0) {
+            sayC('Revisando la página ' + results[r].n + '…');
+            await new Promise(function (ok) { setTimeout(ok, 0); });
+          }
+        }
+        if (!d) continue;
+        if (d.fix) {
+          out += text.slice(last, m.index) + d.fix; last = m.index + w.length;
+          var c = changes.get(w); if (c) c.n++; else changes.set(w, { to: d.fix, n: 1 });
+        } else doubts.set(w, (doubts.get(w) || 0) + 1);
+      }
+      texts.push(out + text.slice(last));
+    }
+    results.forEach(function (res, i) { res.text = texts[i]; });
+    refreshOutput(); stopReading(true); buildQueue();
+    var total = 0; changes.forEach(function (c) { total += c.n; });
+    var ch = [];
+    changes.forEach(function (c, w) { ch.push('«' + w + '» → «' + c.to + '»' + (c.n > 1 ? ' (' + c.n + ' veces)' : '')); });
+    var db = [];
+    Array.from(doubts.entries()).sort(function (a, b) { return b[1] - a[1]; }).slice(0, 150)
+      .forEach(function (e) { db.push('«' + e[0] + '»' + (e[1] > 1 ? ' (' + e[1] + ' veces)' : '')); });
+    fillList($('listaCambios'), ch); fillList($('listaDudosas'), db);
+    $('detCambios').hidden = !ch.length; $('detDudosas').hidden = !db.length;
+    var msg = total
+      ? 'Listo. Se corrigieron ' + plural(total, 'palabra', 'palabras') + ' (' + changes.size + ' distintas).'
+      : 'No encontré errores con una corrección clara.';
+    if (db.length) msg += ' Quedan ' + plural(doubts.size, 'palabra dudosa', 'palabras dudosas') + ' sin tocar.';
+    if (total) msg += ' Podés deshacer la corrección si algo no te convence.';
+    sayC(msg);
+    $('deshacer').hidden = !total;
+  } catch (err) {
+    sayC('No pude cargar el corrector. Revisá la conexión a internet y volvé a intentar. El texto sigue como estaba.');
+  } finally {
+    correcting = false; $('corregir').disabled = false;
+  }
+}
+function undoCorrection() {
+  results.forEach(function (r, i) { r.text = originalTexts[i]; });
+  refreshOutput(); stopReading(true); buildQueue();
+  $('deshacer').hidden = true;
+  $('detCambios').hidden = true; $('detDudosas').hidden = true;
+  sayC('Corrección deshecha. El texto volvió a como lo reconoció el OCR.');
+  $('corregir').focus();
+}
+$('corregir').addEventListener('click', autoCorrect);
+$('deshacer').addEventListener('click', undoCorrection);
 
 /* ---------- resultado ---------- */
 $('go').addEventListener('click', run);
