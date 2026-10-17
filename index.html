@@ -56,8 +56,6 @@ button.primary { background: var(--accent); color: var(--accent-ink); border-col
 button:hover { text-decoration: underline; text-underline-offset: 3px; }
 button:disabled { opacity: .55; cursor: not-allowed; }
 progress { width: 100%; height: 1.2rem; accent-color: var(--accent); }
-.check { display: flex; gap: .7rem; align-items: flex-start; font-weight: 400; }
-.check input { width: 1.5rem; height: 1.5rem; margin-top: .2rem; flex: none; accent-color: var(--accent); }
 :focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
 details summary { cursor: pointer; font-weight: 700; padding-block: .75rem; min-height: 3rem; }
 details > .inner { display: flex; flex-direction: column; gap: .8rem; padding: .3rem 0 .8rem 1rem; border-left: 3px solid var(--line); }
@@ -122,8 +120,7 @@ ul { margin: 0; padding-left: 1.4rem; display: grid; gap: .4rem; }
 
   <section aria-labelledby="h-corr" id="corrSec" hidden>
     <h2 id="h-corr">4. Corregir errores (opcional)</h2>
-    <p class="lead">Busca palabras mal reconocidas, por ejemplo «tcoría» en lugar de «teoría», y une las palabras partidas por guion al final del renglón y corrige solas las que tienen una corrección clara. Las dudosas no las toca, salvo que marques la opción de abajo. Todo ocurre en tu navegador: el texto no se envía a ningún servidor.</p>
-    <label class="check" for="agresivo"><input type="checkbox" id="agresivo"><span>Corregir también los casos menos seguros. Corrige más palabras, pero con más riesgo de equivocarse.</span></label>
+    <p class="lead">Busca palabras mal reconocidas, por ejemplo «tcoría» en lugar de «teoría», y corrige solas las que tienen una única corrección clara. Las dudosas no las toca. Todo ocurre en tu navegador: el texto no se envía a ningún servidor.</p>
     <div class="row">
       <button type="button" id="corregir" class="primary">Corregir automáticamente</button>
       <button type="button" id="deshacer" hidden>Deshacer la corrección</button>
@@ -583,33 +580,24 @@ function getSpell(lang) {
   }
   return spells[lang];
 }
-var CONF = {};
-'ce co eo ao ae il it ij lt nu nr nm hb hn ft gq gy vy uv sz cg'.split(' ').forEach(function (p) { CONF[p] = 1; });
-function plain(s) { return s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase(); }
-function marks(s) { return (s.normalize('NFD').match(/\p{M}/gu) || []).length; }
-/* Costo de cambiar una letra por otra: las tildes y las confusiones típicas del OCR (c/e, i/l, n/u...) cuestan menos. */
-function sub(x, y) {
-  if (x === y) return 0;
-  var px = plain(x), py = plain(y);
-  if (px === py) return 0.3;
-  return (CONF[px + py] || CONF[py + px]) ? 0.5 : 1;
-}
-function wlev(a, b) {
+function lev(a, b) {
   var m = a.length, n = b.length, i, j;
   if (!m) return n;
   if (!n) return m;
-  var prev = [], cur;
+  var prev = [], cur = [];
   for (j = 0; j <= n; j++) prev[j] = j;
   for (i = 1; i <= m; i++) {
     cur = [i];
     for (j = 1; j <= n; j++) {
-      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + sub(a.charAt(i - 1), b.charAt(j - 1)));
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a.charAt(i - 1) === b.charAt(j - 1) ? 0 : 1));
     }
     prev = cur;
   }
   return prev[n];
 }
-/* Solo se toca una palabra si es seguro: no es sigla, número, dirección ni nombre propio a mitad de oración. */
+function plain(s) { return s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase(); }
+/* Solo se toca una palabra si es seguro: no está en un nombre propio, sigla, número,
+   dirección ni corte de renglón con guion. */
 function eligible(text, m) {
   var w = m[0], i = m.index, e = i + w.length;
   if (w.length < 3) return false;
@@ -623,31 +611,21 @@ function eligible(text, m) {
   }
   return true;
 }
-/* Devuelve { fix: 'palabra', hint } si hay una corrección clara, o { fix: null, hint } si es dudosa. */
-function decide(w, spell, aggr) {
+/* Devuelve { fix: 'palabra' } si hay una única corrección clara, o { fix: null } si es dudosa. */
+function decide(w, spell) {
   var lw = w.toLowerCase();
-  var sug = spell.suggest(w).filter(function (s) { return s && s.indexOf(' ') < 0 && s.indexOf('-') < 0; }).slice(0, 8);
+  var sug = spell.suggest(w).filter(function (s) { return s && s.indexOf(' ') < 0; }).slice(0, 6);
   if (!sug.length) return { fix: null };
-  var scored = sug.map(function (s) { return { s: s, c: wlev(lw, s.toLowerCase()) }; });
-  var best = Math.min.apply(null, scored.map(function (x) { return x.c; }));
-  var tied = scored.filter(function (x) { return Math.abs(x.c - best) < 0.01; });
-  var pick = tied[0].s;
-  var limit = (w.length <= 5 ? 1 : 2) + (aggr ? 1 : 0);
-  if (best > limit) return { fix: null, hint: pick };
-  if (tied.length > 1 && !(aggr && w.length >= 4) && !(w.length >= 6 && best <= 1)) return { fix: null, hint: pick };
-  if (plain(pick) === plain(w) && marks(pick) <= marks(w)) return { fix: null };
-  if (/^\p{Lu}/u.test(w) && !/^\p{Lu}/u.test(pick)) pick = pick.charAt(0).toUpperCase() + pick.slice(1);
-  return { fix: pick, hint: pick };
-}
-/* Une las palabras cortadas con guion al final del renglón: «infor-\nmación» pasa a «información».
-   Si las dos mitades son palabras y la unión no, se deja el guion («teórico-\npráctico» pasa a «teórico-práctico»). */
-function joinHyphens(text, spell, counter) {
-  return text.replace(/(\p{L}{2,})[-­¬][ \t]*\n[ \t]*(\p{Ll}\p{L}*)/gu, function (all, a, b) {
-    counter.n++;
-    var joined = a + b;
-    if (!spell.correct(joined) && spell.correct(a) && spell.correct(b)) return a + '-' + b;
-    return joined;
+  var best = 99, n = 0, pick = '';
+  sug.forEach(function (s) {
+    var d = lev(lw, s.toLowerCase());
+    if (d < best) { best = d; n = 1; pick = s; } else if (d === best) n++;
   });
+  var limit = w.length <= 5 ? 1 : 2;
+  if (best > limit || n > 1) return { fix: null };
+  if (plain(pick) === plain(w)) return { fix: null };
+  if (/^\p{Lu}/u.test(w) && !/^\p{Lu}/u.test(pick)) pick = pick.charAt(0).toUpperCase() + pick.slice(1);
+  return { fix: pick };
 }
 function resetCorrectionUi() {
   $('deshacer').hidden = true; $('corregir').disabled = false;
@@ -662,22 +640,21 @@ function fillList(ul, items) {
 async function autoCorrect() {
   if (correcting || !results.length) return;
   correcting = true; $('corregir').disabled = true;
-  var aggr = $('agresivo').checked;
   sayC('Cargando el corrector. La primera vez descarga el diccionario.');
   try {
     var spell = await getSpell(resultLang);
-    var cache = new Map(), changes = new Map(), doubts = new Map(), work = 0, texts = [], joins = { n: 0 };
+    var cache = new Map(), changes = new Map(), doubts = new Map(), work = 0, texts = [];
     for (var r = 0; r < results.length; r++) {
-      var text = joinHyphens(originalTexts[r], spell, joins), out = '', last = 0, m, re = new RegExp("\\p{L}+(?:['’]\\p{L}+)*", 'gu');
+      var text = originalTexts[r], out = '', last = 0, m, re = new RegExp("\\p{L}+(?:['’]\\p{L}+)*", 'gu');
       while ((m = re.exec(text))) {
         var w = m[0];
         if (!eligible(text, m)) continue;
         var d;
         if (cache.has(w)) d = cache.get(w);
         else {
-          d = spell.correct(w) ? null : decide(w, spell, aggr);
+          d = spell.correct(w) ? null : decide(w, spell);
           cache.set(w, d);
-          if (d && ++work % 6 === 0) {
+          if (d && ++work % 8 === 0) {
             sayC('Revisando la página ' + results[r].n + '…');
             await new Promise(function (ok) { setTimeout(ok, 0); });
           }
@@ -686,9 +663,7 @@ async function autoCorrect() {
         if (d.fix) {
           out += text.slice(last, m.index) + d.fix; last = m.index + w.length;
           var c = changes.get(w); if (c) c.n++; else changes.set(w, { to: d.fix, n: 1 });
-        } else {
-          var q = doubts.get(w); if (q) q.n++; else doubts.set(w, { n: 1, hint: d.hint || '' });
-        }
+        } else doubts.set(w, (doubts.get(w) || 0) + 1);
       }
       texts.push(out + text.slice(last));
     }
@@ -698,19 +673,17 @@ async function autoCorrect() {
     var ch = [];
     changes.forEach(function (c, w) { ch.push('«' + w + '» → «' + c.to + '»' + (c.n > 1 ? ' (' + c.n + ' veces)' : '')); });
     var db = [];
-    Array.from(doubts.entries()).sort(function (x, y) { return y[1].n - x[1].n; }).slice(0, 200).forEach(function (e) {
-      db.push('«' + e[0] + '»' + (e[1].hint ? ', quizá «' + e[1].hint + '»' : '') + (e[1].n > 1 ? ' (' + e[1].n + ' veces)' : ''));
-    });
+    Array.from(doubts.entries()).sort(function (a, b) { return b[1] - a[1]; }).slice(0, 150)
+      .forEach(function (e) { db.push('«' + e[0] + '»' + (e[1] > 1 ? ' (' + e[1] + ' veces)' : '')); });
     fillList($('listaCambios'), ch); fillList($('listaDudosas'), db);
     $('detCambios').hidden = !ch.length; $('detDudosas').hidden = !db.length;
-    var parts = [];
-    if (joins.n) parts.push('se unieron ' + plural(joins.n, 'palabra partida', 'palabras partidas') + ' por guion');
-    if (total) parts.push('se corrigieron ' + plural(total, 'palabra', 'palabras') + ' (' + changes.size + ' distintas)');
-    var msg = parts.length ? 'Listo: ' + parts.join(' y ') + '.' : 'No encontré errores con una corrección clara.';
-    if (doubts.size) msg += ' Quedan ' + plural(doubts.size, 'palabra dudosa', 'palabras dudosas') + ' sin tocar, con su posible corrección en la lista.';
-    if (parts.length) msg += ' Podés deshacer todo si algo no te convence.';
+    var msg = total
+      ? 'Listo. Se corrigieron ' + plural(total, 'palabra', 'palabras') + ' (' + changes.size + ' distintas).'
+      : 'No encontré errores con una corrección clara.';
+    if (db.length) msg += ' Quedan ' + plural(doubts.size, 'palabra dudosa', 'palabras dudosas') + ' sin tocar.';
+    if (total) msg += ' Podés deshacer la corrección si algo no te convence.';
     sayC(msg);
-    $('deshacer').hidden = !parts.length;
+    $('deshacer').hidden = !total;
   } catch (err) {
     sayC('No pude cargar el corrector. Revisá la conexión a internet y volvé a intentar. El texto sigue como estaba.');
   } finally {
